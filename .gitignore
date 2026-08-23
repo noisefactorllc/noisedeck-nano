@@ -1,0 +1,5 @@
+build/
+.arduino-user/
+.venv/
+*.bin
+.DS_Store
