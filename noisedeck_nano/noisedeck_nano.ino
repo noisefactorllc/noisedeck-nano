@@ -98,6 +98,65 @@ static uint32_t imu_next = 0, shake_hits = 0, shake_first = 0, shake_cooldown = 
 static const uint16_t COL_WHITE = 0xFFFF;
 static uint16_t COL_CYAN, COL_BLACK;
 
+// Per-section loop timing, reported and reset by the serial `perf` command.
+// Recorded in memory (not printed) so observing the port does not change what
+// is being measured.
+enum { PS_SERIAL = 0, PS_TOUCH, PS_BUTTON, PS_IMU, PS_RENDER, PS_STATUS, PS_COUNT };
+static const char *const PS_NAMES[PS_COUNT] = {"serial", "touch", "button", "imu", "render", "status"};
+static uint32_t perf_max_us[PS_COUNT], perf_sum_us[PS_COUNT];
+static uint32_t perf_worst_us[PS_COUNT], perf_worst_wait_us = 0, perf_worst_frame_us = 0;
+static uint32_t perf_frames = 0, perf_total_us = 0, perf_wait_sum_us = 0, perf_wait_max_us = 0;
+static uint32_t perf_over33 = 0, perf_over66 = 0, perf_over150 = 0;
+static uint32_t perf_window_ms = 0;
+static uint32_t render_wait_us = 0;   // DMA acquire wait inside the last render_frame
+
+static void perf_reset(uint32_t now) {
+  memset(perf_max_us, 0, sizeof(perf_max_us));
+  memset(perf_sum_us, 0, sizeof(perf_sum_us));
+  memset(perf_worst_us, 0, sizeof(perf_worst_us));
+  perf_worst_wait_us = perf_worst_frame_us = 0;
+  perf_frames = perf_total_us = perf_wait_sum_us = perf_wait_max_us = 0;
+  perf_over33 = perf_over66 = perf_over150 = 0;
+  perf_window_ms = now;
+}
+
+static void perf_frame(const uint32_t us[PS_COUNT], uint32_t frame_us, uint32_t wait_us) {
+  perf_frames++;
+  perf_total_us += frame_us;
+  perf_wait_sum_us += wait_us;
+  if (wait_us > perf_wait_max_us) perf_wait_max_us = wait_us;
+  for (int i = 0; i < PS_COUNT; i++) {
+    perf_sum_us[i] += us[i];
+    if (us[i] > perf_max_us[i]) perf_max_us[i] = us[i];
+  }
+  if (frame_us > perf_worst_frame_us) {
+    perf_worst_frame_us = frame_us;
+    perf_worst_wait_us = wait_us;
+    memcpy(perf_worst_us, us, sizeof(perf_worst_us));
+  }
+  if (frame_us > 150000) perf_over150++;
+  else if (frame_us > 66000) perf_over66++;
+  else if (frame_us > 33000) perf_over33++;
+}
+
+static void perf_report(uint32_t now) {
+  uint32_t span = now - perf_window_ms;
+  Serial.printf("{\"perf_window_ms\":%u,\"frames\":%u,\"avg_ms\":%.1f,\"worst_ms\":%.1f,"
+                "\"over33\":%u,\"over66\":%u,\"over150\":%u,\"dma_wait_avg_ms\":%.2f,\"dma_wait_max_ms\":%.1f",
+                span, perf_frames, perf_frames ? perf_total_us / 1000.0f / perf_frames : 0.0f,
+                perf_worst_frame_us / 1000.0f, perf_over33, perf_over66, perf_over150,
+                perf_frames ? perf_wait_sum_us / 1000.0f / perf_frames : 0.0f, perf_wait_max_us / 1000.0f);
+  Serial.printf(",\"worst\":{");
+  for (int i = 0; i < PS_COUNT; i++)
+    Serial.printf("%s\"%s\":%.1f", i ? "," : "", PS_NAMES[i], perf_worst_us[i] / 1000.0f);
+  Serial.printf(",\"dma_wait\":%.1f}", perf_worst_wait_us / 1000.0f);
+  Serial.printf(",\"max\":{");
+  for (int i = 0; i < PS_COUNT; i++)
+    Serial.printf("%s\"%s\":%.1f", i ? "," : "", PS_NAMES[i], perf_max_us[i] / 1000.0f);
+  Serial.println("}}");
+  perf_reset(now);
+}
+
 static const char *mode_name() { return mode == MODE_MENU ? "menu" : (mode == MODE_SLEEP ? "sleep" : "run"); }
 
 static const char *mood_name() {
@@ -261,7 +320,7 @@ static void handle_command(char *line) {
   if (!strcmp(line, "up")) { print_up(); return; }
   if (!strcmp(line, "help")) {
     Serial.println("commands: up | help | fx <name|n|next|prev|rand> | pal <name|n|next|prev|rand> | mood ok|warn|crit|off | "
-                   "auto on|off|<seconds> | bright <0-255> | speed <10-400> | text <message> | menu | sleep | wake | shuffle");
+                   "auto on|off|<seconds> | bright <0-255> | speed <10-400> | text <message> | menu | sleep | wake | shuffle | perf");
     Serial.printf("effects:");
     for (int i = 0; i < FX_COUNT; i++) Serial.printf(" %s", fx_name(i));
     Serial.printf("\npalettes:");
@@ -270,6 +329,7 @@ static void handle_command(char *line) {
     return;
   }
   if (!strcmp(line, "shuffle")) { shuffle_all(); announce_state(); Serial.println("ok shuffle"); return; }
+  if (!strcmp(line, "perf")) { perf_report(millis()); return; }
   if (!strcmp(line, "menu")) {
     if (mode == MODE_MENU) close_menu(); else { if (mode == MODE_SLEEP) wake_up(now); open_menu(now); }
     Serial.printf("ok mode %s\n", mode_name());
@@ -517,6 +577,7 @@ static void draw_splash_band(uint16_t *buf, int y0) {
 }
 
 static void render_frame(uint32_t now) {
+  render_wait_us = 0;
   fx_frame_begin(&fx, now);
   bool splash = now < splash_until;
   bool in_static = now < static_until;
@@ -525,7 +586,10 @@ static void render_frame(uint32_t now) {
   for (int b = 0; b < FX_BANDS; b++) {
     int slot = b & 1;
     uint16_t *buf = display_band_buffer(slot);
-    if (!display_acquire(slot, 200)) continue;
+    uint32_t w0 = micros();
+    bool got = display_acquire(slot, 200);
+    render_wait_us += micros() - w0;
+    if (!got) continue;
     int y0 = b * FX_BAND_H;
     if (splash) draw_splash_band(buf, y0);
     else if (in_static) fx_render_static_band(&fx, y0, buf, menu ? pal_dim : pal);
@@ -540,7 +604,12 @@ static void render_frame(uint32_t now) {
 }
 
 void setup() {
+  // USB-CDC writes must never block the render loop: with the port enumerated but
+  // unread, a blocking print stalls for ~2 s (measured via `perf`). Timeout 0 drops
+  // output instead; the larger buffer keeps lines intact when a reader is attached.
+  Serial.setTxBufferSize(1024);
   Serial.begin(115200);
+  Serial.setTxTimeoutMs(0);
   delay(1500);
   Serial.printf("\n[nano] noisedeck-nano %s booting, chip %s rev %d, cpu %u MHz\n", NANO_VERSION, ESP.getChipModel(),
                 ESP.getChipRevision(), (unsigned)ESP.getCpuFreqMHz());
@@ -586,15 +655,25 @@ void setup() {
   fps_t0 = now;
   next_status = now + 10000;
   show_hint("TAP: MENU", NULL, NULL, 0);
+  perf_reset(now);
   Serial.println("[nano] type 'help' for commands");
 }
 
 void loop() {
   uint32_t now = millis();
+  uint32_t sec_us[PS_COUNT] = {0};
+  uint32_t f0 = micros(), t = f0;
   poll_serial();
+  sec_us[PS_SERIAL] = micros() - t;
+  t = micros();
   poll_touch(now);
+  sec_us[PS_TOUCH] = micros() - t;
+  t = micros();
   poll_button(now);
+  sec_us[PS_BUTTON] = micros() - t;
+  t = micros();
   poll_imu(now);
+  sec_us[PS_IMU] = micros() - t;
 
   if (mode == MODE_MENU && now >= menu_idle_until) {
     close_menu();
@@ -617,7 +696,9 @@ void loop() {
   if (mode == MODE_SLEEP) {
     delay(20);
   } else if (display_ok) {
+    t = micros();
     render_frame(now);
+    sec_us[PS_RENDER] = micros() - t;
     frames++;
   } else {
     delay(50);
@@ -630,6 +711,9 @@ void loop() {
   }
   if (now >= next_status) {
     next_status = now + 10000;
+    t = micros();
     print_status();
+    sec_us[PS_STATUS] = micros() - t;
   }
+  if (mode != MODE_SLEEP && display_ok) perf_frame(sec_us, micros() - f0, render_wait_us);
 }

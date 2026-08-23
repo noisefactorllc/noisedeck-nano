@@ -48,6 +48,7 @@ bin/nano.py shuffle
 bin/nano.py menu               toggle the on-screen menu
 bin/nano.py sleep              screen off (bin/nano.py wake to wake)
 bin/nano.py listen 60          tail the log: gestures, fps every 10 s, shuffles
+bin/nano.py perf               frame-time report since last query (worst frame, per-section)
 bin/nano.py fleet URL...       poll health endpoints every 60 s and set the mood
 ```
 
