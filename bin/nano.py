@@ -16,11 +16,39 @@ script never touches them. Runs with the venv created by bin/flash.sh.
 import argparse
 import glob
 import json
+import os
 import sys
 import time
 import urllib.request
+from pathlib import Path
 
-import serial
+SCRIPT = Path(__file__).resolve()
+PROJECT_VENV = SCRIPT.parent.parent / ".venv"
+PROJECT_PYTHON = PROJECT_VENV / "bin" / "python"
+REEXEC_MARKER = "_NOISEDECK_NANO_VENV_REEXEC"
+
+reexec_attempted = os.environ.pop(REEXEC_MARKER, None) == str(PROJECT_VENV)
+project_venv_active = Path(sys.prefix).resolve() == PROJECT_VENV.resolve()
+project_venv_error = None
+if not project_venv_active and reexec_attempted:
+    project_venv_error = f"{PROJECT_PYTHON} did not activate {PROJECT_VENV}"
+elif not project_venv_active and os.access(PROJECT_PYTHON, os.X_OK):
+    child_env = os.environ.copy()
+    child_env[REEXEC_MARKER] = str(PROJECT_VENV)
+    try:
+        os.execve(str(PROJECT_PYTHON), [str(PROJECT_PYTHON), str(SCRIPT), *sys.argv[1:]], child_env)
+    except OSError as exc:
+        project_venv_error = f"cannot start {PROJECT_PYTHON}: {exc}"
+
+try:
+    import serial
+except ModuleNotFoundError as exc:
+    if exc.name != "serial":
+        raise
+    setup = f"pyserial missing; run {SCRIPT.parent / 'flash.sh'} build to create the project venv"
+    if project_venv_error:
+        setup += f" ({project_venv_error})"
+    sys.exit(setup)
 
 DEFAULT_FLEET = [
     "https://noisedeck.app/up",
