@@ -1,6 +1,10 @@
+<!-- repo-hero -->
+<a href="https://noisedeck.app/"><img src="docs/hero.jpg" alt="Noisedeck Nano ESP32-C6 pocket noise instrument" width="100%"></a>
+
+<sub>Open source from <a href="https://noisefactor.io">Noise Factor</a> &middot; <a href="https://github.com/noisefactorllc">more projects</a></sub>
+
 # Noisedeck Nano
 
-![Noisedeck Nano running the plasma effect on a desk](docs/hero.jpg)
 
 A pocket generative-noise instrument for the Waveshare
 [ESP32-C6-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-c6-touch-amoled-2.16.htm)
