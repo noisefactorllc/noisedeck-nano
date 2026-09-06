@@ -17,15 +17,17 @@ By [Noise Factor](https://noisefactor.io), makers of [Noisedeck](https://noisede
 
 ## Using it
 
-The screen always tells you what to do: "TAP: MENU" sits along the bottom until you
-have opened the menu once, every change flashes the new effect / palette name, and
-closing the menu shows the gesture cheat-sheet for a few seconds.
+The screen provides these instructions:
+
+- "TAP: MENU" appears along the bottom until you open the menu once.
+- Every change flashes the new effect / palette name.
+- Closing the menu shows the gesture cheat-sheet for a few seconds.
 
 | Input | Action |
 |---|---|
 | tap | open the menu |
 | in the menu: tap a row's left / right half | step EFFECT, PALETTE or BRIGHT |
-| in the menu: AUTO, SHUFFLE, SCREEN OFF, CLOSE | toggle auto-shuffle, shuffle, sleep, close (tapping outside the panel also closes; it auto-closes after 15 s) |
+| in the menu: AUTO, SHUFFLE, SCREEN OFF, CLOSE | toggle auto-shuffle, shuffle, sleep, close. Tapping outside the panel also closes it. It closes automatically after 15 s. |
 | swipe left / right | next / previous effect (distance-based, any speed) |
 | swipe up / down | next / previous palette |
 | hold still for 0.3 s, then drag | steer the effect's focal point (a "STEER" cue appears) |
@@ -58,8 +60,8 @@ bin/nano.py fleet URL...       poll health endpoints every 60 s and set the mood
 
 `fleet` keeps the port open and maps "all ok" to `ok`, one failing endpoint to
 `warn`, two or more to `crit`. It expects each URL to answer HTTP 200, ideally with
-`{"status":"ok"}`; the built-in default list is Noise Factor's own services, so pass
-your own.
+`{"status":"ok"}`. The built-in default list contains Noise Factor's own services.
+Pass your own URLs.
 
 ## Building and flashing
 
@@ -69,9 +71,9 @@ bin/flash.sh build    # build only
 bin/test.sh           # host-side engine test (renders every effect, ASCII previews)
 ```
 
-Needs [`arduino-cli`](https://arduino.github.io/arduino-cli/) and python3; the scripts
-are written for macOS (`/dev/cu.usbmodem*`, Homebrew paths) and should need only the
-port glob and the `boot_app0.bin` path changed for Linux. `bin/flash.sh` installs the
+The scripts require [`arduino-cli`](https://arduino.github.io/arduino-cli/) and python3.
+They target macOS (`/dev/cu.usbmodem*`, Homebrew paths).
+Linux should need changes only to the port glob and the `boot_app0.bin` path. `bin/flash.sh` installs the
 esp32 core 3.3.11 and XPowersLib 0.3.3 into a project-local sketchbook
 (`.arduino-user/`, ignored) and an esptool venv (`.venv/`, ignored). FQBN: `esp32c6`,
 USB CDC on boot, 16 MB flash, `app3M_fat9M_16MB` partitions.
@@ -86,8 +88,9 @@ Two gotchas the script already handles, written down so nobody rediscovers them:
    to read from the serial port", at a random offset). esptool hash-verifies every
    write, so the script just retries until a run verifies.
 
-Opening the serial port does not reset the board, but toggling DTR/RTS does (the
-USB-JTAG maps them to reset), which is why `bin/nano.py` never touches them.
+Opening the serial port does not reset the board.
+Toggling DTR/RTS does, because USB-JTAG maps them to reset.
+Therefore, `bin/nano.py` never changes them.
 
 ### Restoring the factory firmware
 
@@ -109,26 +112,31 @@ no FPU): sine, smoothstep and square-root lookup tables, 24.8 fixed-point phases
 32x32 value-noise lattices. The same files compile on a host for `host/test.c`, which
 renders every effect under ASan/UBSan and prints ASCII previews.
 
-The 480x480x16-bit frame (460 KB) does not fit in the C6's RAM, so frames are rendered
-as ten 48-row bands into two DMA buffers: the CPU fills band N+1 while band N is on
-the QSPI bus. Plasma and flow are computed at 240x240 and pixel-doubled with 32-bit
-stores; zone plates and static run at full resolution. Measured on the device:
-plasma and static 40.6 fps (the 40 MHz QSPI transfer ceiling), flow 27.5 fps, zone 24 fps,
-with about 316 KB of heap free and flat.
+The 480x480x16-bit frame (460 KB) does not fit in the C6's RAM.
+The renderer therefore processes frames as ten 48-row bands in two DMA buffers.
+The CPU fills band N+1 while band N is on the QSPI bus.
+It computes plasma and flow at 240x240 and doubles their pixels with 32-bit stores.
+Zone plates and static run at full resolution.
 
-`src/ui/` draws the menu and hint strip straight into the band buffers (the effect keeps
-running underneath through a palette dimmed to 22%), and is host-tested the same way,
-including the touch hit regions.
+Device measurements show about 316 KB of free heap, with no growth, and these frame rates:
+
+- Plasma and static: 40.6 fps (the 40 MHz QSPI transfer ceiling).
+- Flow: 27.5 fps.
+- Zone: 24 fps.
+
+`src/ui/` draws the menu and hint strip directly into the band buffers.
+The effect keeps running underneath through a palette dimmed to 22%.
+The same host tests cover the UI, including the touch hit regions.
 
 `src/bsp/` is the board support: the pin map, an I2C wrapper, the AXP2101 rail plan
 (ALDO3 powers the panel and is power-cycled in place of a reset line), the CST9220
 touch read, the QMI8658 accelerometer, and Espressif's SH8601-family `esp_lcd` driver
-for the CO5300. `src/display.cpp` is the esp_lcd bring-up; pixels go out as big-endian
-RGB565. See [THIRD_PARTY.md](THIRD_PARTY.md) for provenance.
+for the CO5300. `src/display.cpp` initializes esp_lcd.
+It sends pixels as big-endian RGB565. See [THIRD_PARTY.md](THIRD_PARTY.md) for provenance.
 
 ## License and trademark
 
-Code is MIT-licensed, see [LICENSE](LICENSE). "Noisedeck" and "Noise Factor" naming is
-governed by [TRADEMARK.md](TRADEMARK.md); read it before using either name for a
-derivative product. Contributions are welcome under the
+Code is MIT-licensed. See [LICENSE](LICENSE).
+[TRADEMARK.md](TRADEMARK.md) governs the "Noisedeck" and "Noise Factor" names.
+Read the policy before using either name for a derivative product. Contributions are welcome under the
 [code of conduct](CODE_OF_CONDUCT.md).
