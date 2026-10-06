@@ -138,5 +138,6 @@ It sends pixels as big-endian RGB565. See [THIRD_PARTY.md](THIRD_PARTY.md) for p
 
 Code is MIT-licensed. See [LICENSE](LICENSE).
 [TRADEMARK.md](TRADEMARK.md) governs the "Noisedeck" and "Noise Factor" names.
-Read the policy before using either name for a derivative product. Contributions are welcome under the
-[code of conduct](CODE_OF_CONDUCT.md).
+Read the policy before using either name for a derivative product. Contributions follow the Noise Factor
+[contributing policy](https://github.com/noisefactorllc/.github/blob/main/CONTRIBUTING.md) and
+[code of conduct](https://github.com/noisefactorllc/.github/blob/main/CODE_OF_CONDUCT.md).

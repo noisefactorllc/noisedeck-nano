@@ -8,8 +8,6 @@ Everything in this repository is MIT-licensed (see [LICENSE](LICENSE)) except as
   `esp_lcd` panel driver, copyright 2023 Espressif Systems (Shanghai) CO LTD, licensed under
   the Apache License 2.0 (SPDX headers retained in the files). It drives the CO5300 on this
   board unmodified.
-- **`CODE_OF_CONDUCT.md`**: adapted from the Contributor Covenant, version 1.4
-  (https://www.contributor-covenant.org), CC BY 4.0.
 
 ## Fetched at build time
 
