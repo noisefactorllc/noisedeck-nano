@@ -6,9 +6,11 @@ Exercised by host/test.c (so bin/test.sh and scripts/test run it too):
   /dev/ttyUSB* are the Linux fallbacks in that order, an explicit --port is passed
   through untouched, and the error names every supported glob. The glob is always
   mocked, so these checks are deterministic on any host.
-- bin/flash.sh is executed end-to-end (arduino-cli and the project venv stubbed)
-  with a sandboxed HOME, so the script's own port selection, boot_app0.bin
-  discovery and failure handling run unmodified:
+- bin/flash.sh is executed end-to-end from an isolated temporary project copy
+  (byte-identical to the repo's bin/flash.sh; arduino-cli and the project venv
+  stubbed) with a sandboxed HOME, so the script's own port selection,
+  boot_app0.bin discovery and failure handling run unmodified, and the
+  repository's real .venv is never created, modified or removed:
   * with boot_app0.bin under ~/.arduino15 the stub esptool is invoked and
     receives that exact path;
   * with an empty HOME the script exits 1 with its own message before flashing.
@@ -26,6 +28,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "bin"))
+
+# bin/nano.py re-execs itself through PROJECT_VENV/bin/python at import time when
+# that interpreter exists and the re-exec marker is not exactly the venv path.
+# Pre-seed the marker with the venv path, which is nano.py's own "already
+# re-executed" signal, so importing the module runs in this interpreter even when
+# a project .venv exists; the module then records a harmless venv error instead.
+os.environ["_NOISEDECK_NANO_VENV_REEXEC"] = str((ROOT / ".venv").resolve())
 
 serial_stub = types.ModuleType("serial")
 serial_stub.Serial = object
@@ -137,15 +146,26 @@ echo "Hash of data is verified."
 REL = "packages/esp32/hardware/esp32/3.3.11/tools/partitions/boot_app0.bin"
 
 
-def run_flash(home: Path, stubdir: Path, esptool_log: Path):
+def venv_snapshot():
+    venv = ROOT / ".venv"
+    if not venv.exists():
+        return None
+    snap = []
+    for p in sorted(venv.rglob("*")):
+        st = p.stat()
+        snap.append((str(p.relative_to(venv)), st.st_size, st.st_mtime_ns))
+    return snap
+
+
+def run_flash(project: Path, home: Path, stubdir: Path, esptool_log: Path):
     env = dict(os.environ)
     env["HOME"] = str(home)
     env["PATH"] = f"{stubdir}:/usr/bin:/bin"
     env["NANO_ESPTOOL_LOG"] = str(esptool_log)
     env["PORT"] = "/dev/null"  # no board attached in a test container
     return subprocess.run(
-        ["bash", str(ROOT / "bin" / "flash.sh")],
-        env=env, check=False, capture_output=True, text=True, cwd=str(ROOT),
+        ["bash", str(project / "bin" / "flash.sh")],
+        env=env, check=False, capture_output=True, text=True, cwd=str(project),
     )
 
 
@@ -156,6 +176,17 @@ with tempfile.TemporaryDirectory(prefix="nano-flash-e2e-") as td:
     (stubdir / "arduino-cli").write_text(ARDUINO_STUB)
     (stubdir / "arduino-cli").chmod(0o755)
 
+    # Isolated project copy: the real bin/flash.sh bytes under a temp ROOT so the
+    # script's hardcoded $ROOT/.venv resolves to a stub we own, never the repo's.
+    project = tdp / "proj"
+    (project / "bin").mkdir(parents=True)
+    shutil.copy2(ROOT / "bin" / "flash.sh", project / "bin" / "flash.sh")
+    check("flash.sh e2e: project copy is byte-identical to the repo script",
+          (project / "bin" / "flash.sh").read_bytes() == (ROOT / "bin" / "flash.sh").read_bytes())
+    (project / ".venv" / "bin").mkdir(parents=True)
+    (project / ".venv" / "bin" / "python").write_text(PY_STUB)
+    (project / ".venv" / "bin" / "python").chmod(0o755)
+
     linux_home = tdp / "linux"
     empty_home = tdp / "empty"
     for home in (linux_home, empty_home):
@@ -164,43 +195,34 @@ with tempfile.TemporaryDirectory(prefix="nano-flash-e2e-") as td:
     (linux_home / ".arduino15" / REL).touch()
 
     esptool_log = tdp / "esptool.log"
+    before = venv_snapshot()
 
     # Success case: run the real bin/flash.sh; it must find boot_app0.bin in the
     # sandboxed ~/.arduino15 and hand that exact path to the stub esptool.
-    (ROOT / ".venv" / "bin").mkdir(parents=True, exist_ok=True)
-    venv_py = ROOT / ".venv" / "bin" / "python"
-    venv_py.write_text(PY_STUB)
-    venv_py.chmod(0o755)
-    try:
-        r = run_flash(linux_home, stubdir, esptool_log)
-        check("flash.sh e2e: succeeds with linux data dir", r.returncode == 0, r.stdout + r.stderr)
-        args = esptool_log.read_text() if esptool_log.exists() else ""
-        check("flash.sh e2e: esptool invoked", args.strip() != "", "stub was not called")
-        want_boot = f"{linux_home / '.arduino15' / REL}"
-        check("flash.sh e2e: esptool receives boot_app0 path",
-              re.search(r"(?m)^0xe000\n" + re.escape(want_boot) + r"$", args) is not None,
-              args)
-        check("flash.sh e2e: hash-verified line reached", "Hash of data is verified." in r.stdout, r.stdout)
-    finally:
-        venv_py.unlink(missing_ok=True)
-        shutil.rmtree(ROOT / ".venv", ignore_errors=True)  # dirs we created
+    r = run_flash(project, linux_home, stubdir, esptool_log)
+    check("flash.sh e2e: succeeds with linux data dir", r.returncode == 0, r.stdout + r.stderr)
+    args = esptool_log.read_text() if esptool_log.exists() else ""
+    check("flash.sh e2e: esptool invoked", args.strip() != "", "stub was not called")
+    want_boot = f"{linux_home / '.arduino15' / REL}"
+    check("flash.sh e2e: esptool receives boot_app0 path",
+          re.search(r"(?m)^0xe000\n" + re.escape(want_boot) + r"$", args) is not None,
+          args)
+    check("flash.sh e2e: hash-verified line reached", "Hash of data is verified." in r.stdout, r.stdout)
 
     # Failure case: empty HOME must exit 1 with the script's own message, and the
     # stub esptool must never be invoked.
     esptool_log.unlink(missing_ok=True)
-    (ROOT / ".venv" / "bin").mkdir(parents=True, exist_ok=True)
-    venv_py.write_text(PY_STUB)
-    venv_py.chmod(0o755)
-    try:
-        r = run_flash(empty_home, stubdir, esptool_log)
-        check("flash.sh e2e: exits 1 when boot_app0 missing", r.returncode == 1, r.stdout + r.stderr)
-        check("flash.sh e2e: missing-data-dir message",
-              "boot_app0.bin not found under ~/.arduino15 or ~/Library/Arduino15" in r.stderr, r.stderr)
-        args = esptool_log.read_text() if esptool_log.exists() else ""
-        check("flash.sh e2e: esptool not invoked on failure", args.strip() == "", args)
-    finally:
-        venv_py.unlink(missing_ok=True)
-        shutil.rmtree(ROOT / ".venv", ignore_errors=True)  # dirs we created
+    r = run_flash(project, empty_home, stubdir, esptool_log)
+    check("flash.sh e2e: exits 1 when boot_app0 missing", r.returncode == 1, r.stdout + r.stderr)
+    check("flash.sh e2e: missing-data-dir message",
+          "boot_app0.bin not found under ~/.arduino15 or ~/Library/Arduino15" in r.stderr, r.stderr)
+    args = esptool_log.read_text() if esptool_log.exists() else ""
+    check("flash.sh e2e: esptool not invoked on failure", args.strip() == "", args)
+
+    # The repository's own project environment must be untouched by the suite.
+    after = venv_snapshot()
+    check("flash.sh e2e: repo .venv preserved", before == after,
+          "ROOT/.venv changed during the run" if before != after else "")
 
 print(f"\n{'FAILURES: ' + ', '.join(failures) if failures else 'all host-script checks ok'}")
 sys.exit(1 if failures else 0)
