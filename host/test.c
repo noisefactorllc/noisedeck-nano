@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
 #include <time.h>
 #include "../noisedeck_nano/src/fx/fx.h"
 #include "../noisedeck_nano/src/fx/palette.h"
@@ -45,6 +46,18 @@ static void font_dump(const char *str) {
     }
     putchar('\n');
   }
+}
+
+// Run the host-script regression helper via system(), returning its exit status.
+// Returns -1 if the interpreter could not be launched at all.
+static int system_checked(void) {
+  const char *py = getenv("PYTHON3");
+  const char *script = "scripts/check_host_scripts.py";
+  char cmd[512];
+  snprintf(cmd, sizeof(cmd), "%s %s", py ? py : "python3", script);
+  int rc = system(cmd);
+  if (rc == -1) return -1;
+  return WEXITSTATUS(rc);
 }
 
 int main(void) {
@@ -140,6 +153,14 @@ int main(void) {
   for (int i = 0; i < 100; i++) { t += 33; render_frame(s, t); }
   clock_t c1 = clock();
   printf("host plasma: %.2f ms/frame\n", (double)(c1 - c0) * 1000.0 / CLOCKS_PER_SEC / 100.0);
+
+  // bin/nano.py + bin/flash.sh host-script checks: Linux serial-port fallback and
+  // arduino-cli data-dir discovery. nano.py logic is exercised directly; flash.sh
+  // selection logic runs in a sandboxed HOME against stubbed port/device files.
+  printf("--- host scripts ---\n");
+  int script_status = system_checked();
+  if (script_status != 0) { printf("FAIL host-script checks exited %d\n", script_status); return 1; }
+  printf("all host-script checks ok\n");
   printf("OK\n");
   free(s);
   return 0;
