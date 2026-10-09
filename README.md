@@ -72,8 +72,10 @@ bin/test.sh           # host-side engine test (renders every effect, ASCII previ
 ```
 
 The scripts require [`arduino-cli`](https://arduino.github.io/arduino-cli/) and python3.
-They target macOS (`/dev/cu.usbmodem*`, Homebrew paths).
-Linux should need changes only to the port glob and the `boot_app0.bin` path. `bin/flash.sh` installs the
+They target macOS (`/dev/cu.usbmodem*`, Homebrew paths) and also run on Linux
+(`/dev/ttyACM*` / `/dev/ttyUSB*`, `~/.arduino15`): the serial port and the
+`boot_app0.bin` data-directory path are discovered automatically.
+`bin/flash.sh` installs the
 esp32 core 3.3.11 and XPowersLib 0.3.3 into a project-local sketchbook
 (`.arduino-user/`, ignored) and an esptool venv (`.venv/`, ignored). FQBN: `esp32c6`,
 USB CDC on boot, 16 MB flash, `app3M_fat9M_16MB` partitions.

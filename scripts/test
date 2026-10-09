@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Repository test entrypoint: host-side engine check under ASan/UBSan.
+# (bin/test.sh compiles the portable engine + UI and renders every effect.)
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exec "$ROOT/bin/test.sh" "$@"

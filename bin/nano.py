@@ -62,10 +62,11 @@ DEFAULT_FLEET = [
 def find_port(explicit):
     if explicit:
         return explicit
-    ports = sorted(glob.glob("/dev/cu.usbmodem*"))
-    if not ports:
-        sys.exit("no /dev/cu.usbmodem* port; is the board plugged in?")
-    return ports[0]
+    for pattern in ("/dev/cu.usbmodem*", "/dev/ttyACM*", "/dev/ttyUSB*"):
+        ports = sorted(glob.glob(pattern))
+        if ports:
+            return ports[0]
+    sys.exit("no serial port (/dev/cu.usbmodem*, /dev/ttyACM*, /dev/ttyUSB*); is the board plugged in?")
 
 
 def open_port(port):

@@ -47,9 +47,17 @@ echo "== build"
 arduino-cli compile --fqbn "$FQBN" --build-path "$BUILD" --warnings default "$SKETCH" | grep -E "Sketch uses|Global variables"
 [ "${1:-}" = "build" ] && exit 0
 
-PORT="${PORT:-$(ls /dev/cu.usbmodem* 2>/dev/null | head -1 || true)}"
-[ -n "$PORT" ] || { echo "no /dev/cu.usbmodem* port found; is the board plugged in?" >&2; exit 1; }
-BOOT_APP0="$(ls ~/Library/Arduino15/packages/esp32/hardware/esp32/3.3.11/tools/partitions/boot_app0.bin)"
+# Serial port: prefer the macOS USB-CDC name, then the Linux ones.
+PORT="${PORT:-$(ls /dev/cu.usbmodem* /dev/ttyACM* /dev/ttyUSB* 2>/dev/null | head -1 || true)}"
+[ -n "$PORT" ] || { echo "no serial port (/dev/cu.usbmodem*, /dev/ttyACM*, /dev/ttyUSB*); is the board plugged in?" >&2; exit 1; }
+# boot_app0.bin lives in the arduino-cli data directory: ~/.arduino15 on Linux,
+# ~/Library/Arduino15 on macOS.
+ESP32_DIR="packages/esp32/hardware/esp32/3.3.11/tools/partitions/boot_app0.bin"
+BOOT_APP0=""
+for d in "$HOME/.arduino15" "$HOME/Library/Arduino15"; do
+  [ -f "$d/$ESP32_DIR" ] && { BOOT_APP0="$d/$ESP32_DIR"; break; }
+done
+[ -n "$BOOT_APP0" ] || { echo "boot_app0.bin not found under ~/.arduino15 or ~/Library/Arduino15" >&2; exit 1; }
 
 echo "== flash via $PORT"
 for attempt in 1 2 3 4 5 6; do
