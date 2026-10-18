@@ -14,7 +14,7 @@
 //   SCREEN OFF          sleeps; any touch, the button, or a shake wakes it
 //
 // Serial (115200, newline-terminated):
-//   up                      health JSON in the scaffold /up shape
+//   up                      health JSON in the service /up shape
 //   help                    command list
 //   fx <name|n|next|prev|rand>
 //   pal <name|n|next|prev|rand>
