@@ -54,8 +54,6 @@ DEFAULT_FLEET = [
     "https://noisedeck.app/up",
     "https://shuffleset.stream/up",
     "https://forum.noisefactor.io/up",
-    "https://dashboard.noisefactor.io/up",
-    "https://ehsre.noisefactor.io/up",
 ]
 
 
